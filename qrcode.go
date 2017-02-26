@@ -38,6 +38,7 @@ package qrcode
 import (
 	"bytes"
 	"errors"
+	//	"fmt"
 	"image"
 	"image/color"
 	"image/png"
@@ -66,6 +67,18 @@ func Encode(content string, level RecoveryLevel, size int) ([]byte, error) {
 	}
 
 	return q.PNG(size)
+}
+
+func EncodeWithFixPadding(content string, level RecoveryLevel, expectSize, padding int) ([]byte, error) {
+	var q *QRCode
+
+	q, err := New(content, level)
+
+	if err != nil {
+		return nil, err
+	}
+
+	return q.PNG2(expectSize, padding)
 }
 
 // WriteFile encodes, then writes a QR Code to the given filename in PNG format.
@@ -262,12 +275,77 @@ func (q *QRCode) Image(size int) image.Image {
 	return img
 }
 
+// Image returns the QR Code as an image.Image.
+//
+// size is both the width and height in pixels.
+func (q *QRCode) Image2(expectSize, offset int) image.Image {
+	// Minimum pixels (both width and height) required.
+	realSize := q.symbol.size
+	size := expectSize
+	// Actual pixels available to draw the symbol. Automatically increase the
+	// image size if it's not large enough.
+	if size < realSize {
+		size = realSize
+	}
+
+	// Size of each module drawn.
+	pixelsPerModule := size / realSize
+
+	size = offset*2 + realSize*pixelsPerModule
+	// Center the symbol within the image.
+	//	offset := (size - realSize*pixelsPerModule) / 2
+
+	rect := image.Rectangle{Min: image.Point{0, 0}, Max: image.Point{size, size}}
+	img := image.NewRGBA(rect)
+
+	for i := 0; i < size; i++ {
+		for j := 0; j < size; j++ {
+			img.Set(i, j, q.BackgroundColor)
+		}
+	}
+	//	fmt.Printf("Image() size=%d,realSize=%d,pixelsPerModule=%d,offset=%d \n", size, realSize, pixelsPerModule, offset)
+	bitmap := q.symbol.bitmap()
+	for y, row := range bitmap {
+		for x, v := range row {
+			if v {
+				startX := x*pixelsPerModule + offset
+				startY := y*pixelsPerModule + offset
+				for i := startX; i < startX+pixelsPerModule; i++ {
+					for j := startY; j < startY+pixelsPerModule; j++ {
+						img.Set(i, j, q.ForegroundColor)
+					}
+				}
+				//				fmt.Printf("Image() x=%d,y=%d,startX=%d,startY=%d \n", x, y, startX, startY)
+			}
+		}
+	}
+
+	return img
+}
+
 // PNG returns the QR Code as a PNG image.
 //
 // size is both the image width and height in pixels. If size is too small then
 // a larger image is silently returned.
 func (q *QRCode) PNG(size int) ([]byte, error) {
 	img := q.Image(size)
+
+	var b bytes.Buffer
+	err := png.Encode(&b, img)
+
+	if err != nil {
+		return nil, err
+	}
+
+	return b.Bytes(), nil
+}
+
+// PNG returns the QR Code as a PNG image.
+//
+// size is both the image width and height in pixels. If size is too small then
+// a larger image is silently returned.
+func (q *QRCode) PNG2(expectSize, padding int) ([]byte, error) {
+	img := q.Image2(expectSize, padding)
 
 	var b bytes.Buffer
 	err := png.Encode(&b, img)
